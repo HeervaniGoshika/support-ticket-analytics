@@ -1,0 +1,80 @@
+services:
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dotmappers-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+
+  ollama-model:
+    image: ollama/ollama:latest
+    container_name: dotmappers-ollama-model
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama..."
+        until ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+
+        echo "Pulling LLM..."
+        ollama pull llama3.2:3b
+
+        echo "Model ready."
+
+
+  api:
+    build: .
+    container_name: dotmappers-api
+    depends_on:
+      ollama-model:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: sqlite:///./data/support_tickets.db
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:3b
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ]
+
+
+  ui:
+    build: .
+    container_name: dotmappers-ui
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./ui:/app/ui
+    command:
+      [
+        "streamlit",
+        "run",
+        "ui/streamlit_app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501"
+      ]
+
+
+volumes:
+  ollama_data:
